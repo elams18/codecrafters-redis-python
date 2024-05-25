@@ -27,7 +27,7 @@ def handle_client(client, redis_data: dict, is_master=False):
         return processed_segments
     
     def server_info():
-        role = "role:master"
+        role = "role:"+("master" if is_master else "slave")
         return encode_bulk_string(role)
     
     while client:
@@ -131,7 +131,12 @@ def main(port=6379, is_master=False):
 if __name__ == "__main__":
     argsParser = argparse.ArgumentParser("A Redis server written in Python")
     argsParser.add_argument("--port", type=int, dest="port", default=6379)
+    argsParser.add_argument("--replicaof", type=str, dest="replica")
     args = argsParser.parse_args()
     port = args.port
-
-    main(port, True)
+    
+    replica = args.replica
+    if replica:
+        main(port, False)
+    else:
+        main(port, True)
