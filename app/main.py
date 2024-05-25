@@ -3,6 +3,7 @@ import threading
 import re
 from datetime import datetime, timedelta
 import time
+import argparse
 
 def handle_client(client, redis_data: dict):
     def split_segments(s):
@@ -100,9 +101,9 @@ def expiration_cleanup(redis_data: dict):
         # Sleep for some time before checking again (e.g., every minute)
         time.sleep(60)
 
-def main():
-    print("Logs from your program will appear here!")
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+def main(port=6379):
+    print(f"Logs from your program will appear here in port {port}!")
+    server_socket = socket.create_server(("localhost", port), reuse_port=True)
     redis_data = {}
 
     # Start expiration cleanup thread
@@ -116,4 +117,9 @@ def main():
         thread.start()
 
 if __name__ == "__main__":
-    main()
+    argsParser = argparse.ArgumentParser("A Redis server written in Python")
+    argsParser.add_argument("--port", type=int, dest="port", default=6379)
+    args = argsParser.parse_args()
+    port = args.port
+
+    main(port)
