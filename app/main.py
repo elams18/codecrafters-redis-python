@@ -5,7 +5,14 @@ from datetime import datetime, timedelta
 import time
 import argparse
 
-def handle_client(client, redis_data: dict):
+def encode_bulk_string(s: str) -> bytes:
+    return ("$"+ str(len(s)) + "\r\n" + s + "\r\n").encode()
+
+def encode_error_message(err: str) -> bytes:
+    return ("-ERR " + err+ "\r\n").encode()
+
+
+def handle_client(client, redis_data: dict, is_master=False):
     def split_segments(s):
         segments = s.split('$')
         if segments[0].startswith('*'):
@@ -19,11 +26,9 @@ def handle_client(client, redis_data: dict):
             processed_segments.append(processed_segment)
         return processed_segments
     
-    def encode_bulk_string(s: str) -> bytes:
-        return ("$"+ str(len(s)) + "\r\n" + s + "\r\n").encode()
-    
-    def encode_error_message(err: str) -> bytes:
-        return ("-ERR " + err+ "\r\n").encode()
+    def server_info():
+        role = "role:master"
+        return encode_bulk_string(role)
     
     while client:
         req = client.recv(4096)
@@ -91,17 +96,24 @@ def handle_client(client, redis_data: dict):
                     err = encode_error_message("echo msg not given")
                     client.send(err)
                     break
+            if cmd.lower() == 'info':
+                try:
+                    repl = next(cmds)
+                    client.send(server_info())
+                except StopIteration:
+                    break
 
-def expiration_cleanup(redis_data: dict):
-    while True:
-        # Iterate over keys and remove expired keys
-        for key in list(redis_data.keys()):
-            if redis_data[key].get('expiry') and redis_data[key]['expiry'] < datetime.now():
-                del redis_data[key]
-        # Sleep for some time before checking again (e.g., every minute)
-        time.sleep(60)
+def main(port=6379, is_master=False):
 
-def main(port=6379):
+    def expiration_cleanup(redis_data: dict):
+        while True:
+            # Iterate over keys and remove expired keys
+            for key in list(redis_data.keys()):
+                if redis_data[key].get('expiry') and redis_data[key]['expiry'] < datetime.now():
+                    del redis_data[key]
+            # Sleep for some time before checking again (e.g., every minute)
+            time.sleep(60)
+
     print(f"Logs from your program will appear here in port {port}!")
     server_socket = socket.create_server(("localhost", port), reuse_port=True)
     redis_data = {}
@@ -113,7 +125,7 @@ def main(port=6379):
 
     while True:
         client, address = server_socket.accept() # wait for client
-        thread = threading.Thread(target=handle_client, args=(client, redis_data))
+        thread = threading.Thread(target=handle_client, args=(client, redis_data, is_master))
         thread.start()
 
 if __name__ == "__main__":
@@ -122,4 +134,4 @@ if __name__ == "__main__":
     args = argsParser.parse_args()
     port = args.port
 
-    main(port)
+    main(port, True)
