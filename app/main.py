@@ -26,9 +26,11 @@ def handle_client(client, redis_data: dict, is_master=False):
             processed_segments.append(processed_segment)
         return processed_segments
     
-    def server_info():
-        role = "role:"+("master" if is_master else "slave")
-        return encode_bulk_string(role)
+    def send_server_info(client):
+        result = "role:"+("master" if is_master else "slave") + "\r\n"
+        result = result + "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb" + "\r\n"
+        result = result + "master_repl_offset:0" + "\r\n"
+        client.send(encode_bulk_string(result))
     
     while client:
         req = client.recv(4096)
@@ -99,7 +101,7 @@ def handle_client(client, redis_data: dict, is_master=False):
             if cmd.lower() == 'info':
                 try:
                     repl = next(cmds)
-                    client.send(server_info())
+                    send_server_info(client)
                 except StopIteration:
                     break
 
