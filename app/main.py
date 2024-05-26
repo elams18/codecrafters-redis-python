@@ -3,18 +3,24 @@ import threading
 import re
 from datetime import datetime, timedelta
 import time
+import base64
 import argparse
 
 redis_data = {}
 server_data = {}
 BUFFER_SIZE = 4096
+RDB_FILE_STR = base64.decodebytes("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==".encode('ascii'))
 
 def encode_bulk_string(s: str) -> bytes:
     return ("$"+ str(len(s)) + "\r\n" + s + "\r\n").encode()
 
 def encode_error_message(err: str) -> bytes:
     return ("-ERR " + err+ "\r\n").encode()
-    
+
+def encode_file_message(file_bytes:bytes):
+    return ("$" + str(len(file_bytes)) + "\r\n").encode() +file_bytes
+
+
 def expiration_cleanup(redis_data: dict):
     while True:
         # Iterate over keys and remove expired keys
@@ -127,6 +133,7 @@ def handle_client(client, redis_data: dict, replica=None):
                     arg2 = next(cmds)
                     if arg1 == '?' and arg2 == '-1':
                         client.send(b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n")
+                        client.send(encode_file_message(RDB_FILE_STR))
                 except StopIteration:
                     break 
 
@@ -147,6 +154,8 @@ def connect_to_master(host, port, replica_port):
         s.send(repl_conf_str.encode())
         res = s.recv(BUFFER_SIZE)
         print(res)
+        rdb_file = s.recv(BUFFER_SIZE)
+        print(rdb_file)
 
 def main(port=6379, replica=None, from_replica=False):
     # Start expiration cleanup thread
