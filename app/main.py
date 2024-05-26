@@ -8,7 +8,10 @@ import argparse
 
 redis_data = {}
 server_data = {}
+replicas = []
 BUFFER_SIZE = 4096
+MASTER_PORT = 6379
+MASTER_HOST = 'localhost'
 RDB_FILE_STR = base64.decodebytes("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==".encode('ascii'))
 
 def encode_bulk_string(s: str) -> bytes:
@@ -19,6 +22,13 @@ def encode_error_message(err: str) -> bytes:
 
 def encode_file_message(file_bytes:bytes):
     return ("$" + str(len(file_bytes)) + "\r\n").encode() +file_bytes
+
+def encode_array_message(arr: list):
+    n = len(arr)
+    s = f"*{n}\r\n"
+    for data in arr:
+        s += f"${len(data)}\r\n{data}\r\n"
+    return s.encode()
 
 
 def expiration_cleanup(redis_data: dict):
@@ -35,6 +45,18 @@ def send_server_info(client, replica):
     result = result + "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb" + "\r\n"
     result = result + "master_repl_offset:0" + "\r\n"
     client.send(encode_bulk_string(result)) 
+
+def propagate_to_replica(cmd, key):
+    print("PROPAGATE", server_data)
+    if cmd.lower() == 'set':
+        for port in replicas:
+            print(port)
+            if port != MASTER_PORT:
+                print(f"Send {cmd} to {port}")
+                with socket.create_connection((MASTER_HOST, port)) as repl_socket:
+                    print(encode_array_message([cmd, key, redis_data[key]]))
+                    repl_socket.send(encode_array_message([cmd, key, redis_data[key]]))
+    
 
 def handle_client(client, redis_data: dict, replica=None):
     def split_segments(s):
@@ -70,6 +92,7 @@ def handle_client(client, redis_data: dict, replica=None):
                 key = None
                 value = None
                 try:
+                    print("set")
                     key = next(cmds)
                     value = next(cmds)
                     expiry_cmd = next(cmds)
@@ -78,11 +101,15 @@ def handle_client(client, redis_data: dict, replica=None):
                         ms = int(next(cmds))
                         expiry = datetime.now() + timedelta(milliseconds=ms)
                     redis_data[key] = {"value": value, "expiry": expiry}
-                    client.send(b"+OK\r\n")  
+                    print(key)
+                    if not replica:
+                        propagate_to_replica("SET", key, replica) 
+                    client.send(b"+OK\r\n")
                 except StopIteration:
                     # if there is no expiration added, just send the value
                     if key and value:
                         redis_data[key] = {"value": value}
+                        propagate_to_replica("SET", key) 
                         client.send(b"+OK\r\n")
                     else:
                         client.send(b"$-1\r\n")  
@@ -124,6 +151,10 @@ def handle_client(client, redis_data: dict, replica=None):
                     break
             if cmd.lower() == 'replconf':
                 try:
+                    port_str = next(cmds)
+                    if port_str == 'listening-port':
+                        port = int(next(cmds))
+                        replicas.append(port)
                     client.send(b"+OK\r\n")
                 except StopIteration:
                     break   
@@ -185,10 +216,13 @@ if __name__ == "__main__":
         if replica:
             master_host, master_port = replica.split(" ")[0], replica.split(" ")[1]
             master_port = int(master_port)
+            MASTER_PORT = master_port
+            MASTER_HOST = master_host
             master_server = connect_to_master(master_host, master_port, port)
             server_data["master"] = master_server
             main(port, replica)
         else:
+            MASTER_PORT = port
             main(port, None)
     finally:
         print("CLOSE ALL CONNECTIONS")
