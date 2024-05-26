@@ -116,11 +116,21 @@ def handle_client(client, redis_data: dict, replica=None):
                     send_server_info(client, replica)
                 except StopIteration:
                     break
+            if cmd.lower() == 'replconf':
+                try:
+                    client.send(b"+OK\r\n")
+                except StopIteration:
+                    break   
 
-def connect_to_master(host, port):
+def connect_to_master(host, port, replica_port):
     with socket.create_connection(("localhost", port)) as s:
         s.send(b"*1\r\n$4\r\nPING\r\n")
         res = s.recv(BUFFER_SIZE)
+        print(res)
+        repl_conf_str = f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{replica_port}\r\n"
+        s.send(repl_conf_str.encode())
+        res = s.recv(BUFFER_SIZE)
+        print(res)
 
 def main(port=6379, replica=None, from_replica=False):
     # Start expiration cleanup thread
@@ -150,7 +160,7 @@ if __name__ == "__main__":
         if replica:
             master_host, master_port = replica.split(" ")[0], replica.split(" ")[1]
             master_port = int(master_port)
-            master_server = connect_to_master(master_host, master_port)
+            master_server = connect_to_master(master_host, master_port, port)
             server_data["master"] = master_server
             main(port, replica)
         else:
