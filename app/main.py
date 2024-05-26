@@ -121,6 +121,14 @@ def handle_client(client, redis_data: dict, replica=None):
                     client.send(b"+OK\r\n")
                 except StopIteration:
                     break   
+            if cmd.lower() == 'psync':
+                try:
+                    arg1 = next(cmds)
+                    arg2 = next(cmds)
+                    if arg1 == '?' and arg2 == '-1':
+                        client.send(b"+FULLRESYNC <REPL_ID> 0\r\n")
+                except StopIteration:
+                    break 
 
 def connect_to_master(host, port, replica_port):
     with socket.create_connection(("localhost", port)) as s:
