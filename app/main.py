@@ -11,8 +11,9 @@ server_data = {}
 replicas = []
 BUFFER_SIZE = 4096
 MASTER_PORT = 6379
-MASTER_HOST = 'localhost'
+MASTER_HOST = '127.0.0.1'
 RDB_FILE_STR = base64.decodebytes("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==".encode('ascii'))
+role = "master"
 
 def encode_bulk_string(s: str) -> bytes:
     return ("$"+ str(len(s)) + "\r\n" + s + "\r\n").encode()
@@ -41,21 +42,21 @@ def expiration_cleanup(redis_data: dict):
         time.sleep(60)
 
 def send_server_info(client, replica):
-    result = "role:"+("master" if not replica else "slave") + "\r\n"
+    result = "role:"+("master" if role=='master' else "slave") + "\r\n"
     result = result + "master_replid:8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb" + "\r\n"
     result = result + "master_repl_offset:0" + "\r\n"
     client.send(encode_bulk_string(result)) 
 
-def propagate_to_replica(cmd, key):
-    print("PROPAGATE", server_data)
-    if cmd.lower() == 'set':
-        for port in replicas:
-            print(port)
-            if port != MASTER_PORT:
-                print(f"Send {cmd} to {port}")
-                with socket.create_connection((MASTER_HOST, port)) as repl_socket:
-                    print(encode_array_message([cmd, key, redis_data[key]['value']]))
-                    repl_socket.send(encode_array_message([cmd, key, redis_data[key]['value']]))
+def propagate_to_replica(command):
+    print(f"PROPAGATE {command}")  # Log the replicas dictionary
+    for sock in replicas:
+        try:
+            sock.sendall(command)
+        except ConnectionRefusedError:
+            print(f"Connection to replica at port {sock} refused")
+        except Exception as e:
+            print(f"Error connecting to replica at port {sock}: {e}")
+
     
 
 def handle_client(client, redis_data: dict, replica=None):
@@ -75,7 +76,6 @@ def handle_client(client, redis_data: dict, replica=None):
     while client:
         req = client.recv(BUFFER_SIZE)
         data: str = req.decode() 
-        print(data)
         cmds_list = split_segments(data)
         cmds = iter(cmds_list)
         if not cmds_list:
@@ -93,7 +93,6 @@ def handle_client(client, redis_data: dict, replica=None):
                 key = None
                 value = None
                 try:
-                    print("set")
                     key = next(cmds)
                     value = next(cmds)
                     expiry = None
@@ -104,10 +103,17 @@ def handle_client(client, redis_data: dict, replica=None):
                             expiry = datetime.now() + timedelta(milliseconds=ms)
                     except StopIteration:
                         pass
+                    try:
+                        if key not in redis_data:
+                            propagate_to_replica(req) 
+                    except ConnectionRefusedError:
+                        print("Connection Refused")
+                        pass
                     redis_data[key] = {"value": value, "expiry": expiry}
-                    propagate_to_replica("SET", key) 
-                    client.send(b"+OK\r\n")
-                except:
+                    if not replica:
+                        client.send(b"+OK\r\n")
+                except Exception as e:
+                    print(e)
                     client.send(b"$-1\r\n")  
                     break
             if cmd.lower() == 'get':
@@ -147,10 +153,12 @@ def handle_client(client, redis_data: dict, replica=None):
                     break
             if cmd.lower() == 'replconf':
                 try:
+                    # print(client.address)
+                    replicas.append(client)
                     port_str = next(cmds)
                     if port_str == 'listening-port':
                         port = int(next(cmds))
-                        replicas.append(port)
+                        print("connecting from port", port, client)
                     client.send(b"+OK\r\n")
                 except StopIteration:
                     break   
@@ -165,24 +173,24 @@ def handle_client(client, redis_data: dict, replica=None):
                     break 
 
 def connect_to_master(host, port, replica_port):
-    with socket.create_connection(("localhost", port)) as s:
-        s.send(b"*1\r\n$4\r\nPING\r\n")
-        res = s.recv(BUFFER_SIZE)
-        print(res)
-        repl_conf_str = f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{replica_port}\r\n"
-        s.send(repl_conf_str.encode())
-        res = s.recv(BUFFER_SIZE)
-        print(res)
-        repl_conf_str = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
-        s.send(repl_conf_str.encode())
-        res = s.recv(BUFFER_SIZE)
-        print(res)
-        repl_conf_str = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"
-        s.send(repl_conf_str.encode())
-        res = s.recv(BUFFER_SIZE)
-        print(res)
-        rdb_file = s.recv(BUFFER_SIZE)
-        print(rdb_file)
+    s = socket.create_connection(("localhost", port))
+    s.send(b"*1\r\n$4\r\nPING\r\n")
+    res = s.recv(BUFFER_SIZE)
+    print(res)
+    repl_conf_str = f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{replica_port}\r\n"
+    s.send(repl_conf_str.encode())
+    res = s.recv(BUFFER_SIZE)
+    print(res)
+    repl_conf_str = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+    s.send(repl_conf_str.encode())
+    res = s.recv(BUFFER_SIZE)
+    print(res)
+    repl_conf_str = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"
+    s.send(repl_conf_str.encode())
+    res = s.recv(BUFFER_SIZE)
+    print(res)
+    rdb_file = s.recv(BUFFER_SIZE)
+    print(rdb_file)
 
 def main(port=6379, replica=None, from_replica=False):
     # Start expiration cleanup thread
@@ -210,6 +218,7 @@ if __name__ == "__main__":
         
         replica = args.replica
         if replica:
+            role='slave'
             master_host, master_port = replica.split(" ")[0], replica.split(" ")[1]
             master_port = int(master_port)
             MASTER_PORT = master_port
