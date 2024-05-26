@@ -126,7 +126,7 @@ def handle_client(client, redis_data: dict, replica=None):
                     arg1 = next(cmds)
                     arg2 = next(cmds)
                     if arg1 == '?' and arg2 == '-1':
-                        client.send(b"+FULLRESYNC <REPL_ID> 0\r\n")
+                        client.send(b"+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n")
                 except StopIteration:
                     break 
 
