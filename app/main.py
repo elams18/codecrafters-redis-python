@@ -75,6 +75,7 @@ def handle_client(client, redis_data: dict, replica=None):
     while client:
         req = client.recv(BUFFER_SIZE)
         data: str = req.decode() 
+        print(data)
         cmds_list = split_segments(data)
         cmds = iter(cmds_list)
         if not cmds_list:
