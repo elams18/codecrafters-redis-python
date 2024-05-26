@@ -131,6 +131,10 @@ def connect_to_master(host, port, replica_port):
         s.send(repl_conf_str.encode())
         res = s.recv(BUFFER_SIZE)
         print(res)
+        repl_conf_str = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+        s.send(repl_conf_str.encode())
+        res = s.recv(BUFFER_SIZE)
+        print(res)
 
 def main(port=6379, replica=None, from_replica=False):
     # Start expiration cleanup thread
