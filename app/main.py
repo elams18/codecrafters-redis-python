@@ -100,11 +100,10 @@ def handle_client(client, redis_data: dict, replica=None):
                     if expiry_cmd.lower() == 'px': 
                         ms = int(next(cmds))
                         expiry = datetime.now() + timedelta(milliseconds=ms)
-                    redis_data[key] = {"value": value, "expiry": expiry}
-                    print(key)
-                    if not replica:
-                        propagate_to_replica("SET", key, replica) 
-                    client.send(b"+OK\r\n")
+                        redis_data[key] = {"value": value, "expiry": expiry}
+                        print(key)
+                        propagate_to_replica("SET", key) 
+                        client.send(b"+OK\r\n")
                 except StopIteration:
                     # if there is no expiration added, just send the value
                     if key and value:
