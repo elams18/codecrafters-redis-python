@@ -54,8 +54,8 @@ def propagate_to_replica(cmd, key):
             if port != MASTER_PORT:
                 print(f"Send {cmd} to {port}")
                 with socket.create_connection((MASTER_HOST, port)) as repl_socket:
-                    print(encode_array_message([cmd, key, redis_data[key]]))
-                    repl_socket.send(encode_array_message([cmd, key, redis_data[key]]))
+                    print(encode_array_message([cmd, key, redis_data[key]['value']]))
+                    repl_socket.send(encode_array_message([cmd, key, redis_data[key]['value']]))
     
 
 def handle_client(client, redis_data: dict, replica=None):
